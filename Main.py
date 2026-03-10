@@ -2,6 +2,39 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
+# --- SISTEMA DE LOGIN SIMPLES ---
+def check_password():
+    """Retorna True se o utilizador introduziu a password correta."""
+    def password_entered():
+        # Verifica se a password coincide com a que guardaste nas Secrets
+        if st.session_state["password"] == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Limpa a password da memória por segurança
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # Primeira vez que o site abre: mostra o formulário
+        st.title("🔐 Acesso Restrito")
+        st.text_input("Introduz a Password do Império", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password errada
+        st.title("🔐 Acesso Restrito")
+        st.text_input("Introduz a Password do Império", type="password", on_change=password_entered, key="password")
+        st.error("❌ Password errada. Tenta outra vez ou volta para a China.")
+        return False
+    else:
+        # Password correta!
+        return True
+
+if not check_password():
+    st.stop()  # Trava o site aqui se não estiver logado
+
+# --- DAQUI PARA BAIXO SEGUE O TEU CÓDIGO NORMAL ---
+st.success("Bem-vindo de volta, Boss!")
+# (O resto do teu código da Google Sheet entra aqui)
+
 st.set_page_config(page_title="Resseling Pro", layout="wide")
 
 # 1. Ligar à Google Sheet
