@@ -6,7 +6,7 @@ st.set_page_config(page_title="Resseling Pro", layout="wide")
 
 # 1. Ligar à Google Sheet
 conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read()
+df = conn.read(ttl=0)
 
 # Garantir que as colunas existem (caso a folha esteja vazia)
 if df.empty:
@@ -71,7 +71,8 @@ if not df.empty:
         # Limpar colunas calculadas antes de gravar para não sujar a Google Sheet
         to_save = edited_df.drop(columns=['Custo Total', 'Lucro'])
         conn.update(data=to_save)
-        st.success("Base de dados atualizada!")
+        st.cache_data.clear() # Isto limpa a memória "à bruta"
+        st.success("Gravado na nuvem!")
         st.rerun()
 
 else:
