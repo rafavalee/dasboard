@@ -31,6 +31,10 @@ df = conn.read(ttl=0)
 
 # Colunas base para o negócio não descarrilar
 colunas_base = ["Nome", "Link", "Preco_China", "Portes", "Preco_Venda", "Data_Registo", "Estado"]
+colunas_necessarias = ["Nome", "Link", "Preco_China", "Portes", "Preco_Venda", "Data_Registo", "Estado"]
+for col in colunas_necessarias:
+    if col not in df.columns:
+        df[col] = None # Cria a coluna vazia se não existir
 
 if df.empty or df is None:
     df = pd.DataFrame(columns=colunas_base)
@@ -105,3 +109,8 @@ if not df.empty:
     itens_velhos = stock_ativo[stock_ativo['Dias_Stock'] > 30]
     if not itens_velhos.empty:
         st.warning(f"⚠️ Tens {len(itens_velhos)} produtos a ganhar pó há mais de um mês! Hora de baixar o preço?")
+
+# --- TRATAMENTO DE DATAS (Onde dava o erro) ---
+# Se a coluna estiver vazia, usamos a data de hoje como padrão
+df['Data_Registo'] = pd.to_datetime(df['Data_Registo']).fillna(datetime.now())
+df['Dias_Stock'] = (datetime.now() - df['Data_Registo']).dt.days
