@@ -1,108 +1,107 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
+from datetime import datetime
 
-# OBRIGATÓRIO: Ser o primeiro comando do Streamlit a correr
 st.set_page_config(page_title="Resseling Pro", layout="wide")
 
-# --- SISTEMA DE LOGIN ---
+# --- LOGIN (Mantém a tua pass nas Secrets) ---
 def check_password():
-    """Retorna True se o utilizador introduziu a password correta."""
     def password_entered():
         if st.session_state["password"] == st.secrets["password"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-
     if "password_correct" not in st.session_state:
         st.title("🔐 Acesso Restrito")
-        st.text_input("Introduz a Password do Império", type="password", on_change=password_entered, key="password")
+        st.text_input("Password do Império", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        st.title("🔐 Acesso Restrito")
-        st.text_input("Introduz a Password do Império", type="password", on_change=password_entered, key="password")
-        st.error("❌ Password errada. Tenta outra vez ou volta para a China.")
+        st.error("❌ Errado. Tenta outra vez.")
         return False
-    else:
-        return True
+    return True
 
 if not check_password():
     st.stop()
 
-# --- INÍCIO DO DASHBOARD (SÓ CORRE SE LOGADO) ---
-st.success("Bem-vindo de volta, Boss!")
-
-# 1. Ligar à Google Sheet (ttl=0 para dados sempre frescos)
+# --- LIGAÇÃO E DADOS ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(ttl=0)
 
-# Garantir que as colunas existem (caso a folha esteja vazia)
+# Colunas base para o negócio não descarrilar
+colunas_base = ["Nome", "Link", "Preco_China", "Portes", "Preco_Venda", "Data_Registo", "Estado"]
+
 if df.empty or df is None:
-    df = pd.DataFrame(columns=["Nome", "Link", "Preco_China", "Portes", "Preco_Venda"])
+    df = pd.DataFrame(columns=colunas_base)
 
-st.title("💰 Gestão de Stock China")
+st.title("🚀 Gestão de Importação & Vendas")
 
-# --- FORMULÁRIO DE ENTRADA ---
-with st.expander("➕ Adicionar Novo Produto", expanded=False):
+# --- FORMULÁRIO COM DATA E ESTADO (Ideia 1 e 4) ---
+with st.expander("➕ Registar Nova Carga da China", expanded=False):
     with st.form("entrada_dados"):
-        nome = st.text_input("Nome do Item")
-        link = st.text_input("Link acbuy")
-        col1, col2, col3 = st.columns(3)
-        p_china = col1.number_input("Preço China (X)", min_value=0.0)
-        portes = col2.number_input("Portes (Y)", min_value=0.0)
-        venda = col3.number_input("Preço Venda (Z)", min_value=0.0)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            nome = st.text_input("O que compraste?")
+            link = st.text_input("Link acbuy")
+            data_hoje = st.date_input("Data da Compra", datetime.now())
+        with col_b:
+            estado = st.selectbox("Estado Inicial", ["Encomendado", "Em Trânsito", "Em Stock", "Vendido"])
+            p_china = st.number_input("Preço China (X)", min_value=0.0)
+            portes = st.number_input("Portes (Y)", min_value=0.0)
+            venda = st.number_input("Preço Venda (Z)", min_value=0.0)
         
-        if st.form_submit_button("Registar"):
-            novo_dado = pd.DataFrame([{"Nome": nome, "Link": link, "Preco_China": p_china, "Portes": portes, "Preco_Venda": venda}])
-            df_atualizado = pd.concat([df, novo_dado], ignore_index=True)
-            conn.update(data=df_atualizado)
-            st.cache_data.clear() # Limpa a memória para forçar a leitura do novo dado
-            st.success("Gravado na nuvem!")
+        if st.form_submit_button("Lançar no Sistema"):
+            novo = pd.DataFrame([{"Nome": nome, "Link": link, "Preco_China": p_china, "Portes": portes, 
+                                  "Preco_Venda": venda, "Data_Registo": str(data_hoje), "Estado": estado}])
+            df = pd.concat([df, novo], ignore_index=True)
+            conn.update(data=df)
+            st.cache_data.clear()
             st.rerun()
 
-# --- CÁLCULOS E ESTATÍSTICAS ---
+# --- LOGICA DE TRATAMENTO DE DADOS ---
 if not df.empty:
-    # Contas feitas pelo computador para não te cansares
-    df['Custo Total'] = df['Preco_China'] + df['Portes']
-    df['Lucro'] = df['Preco_Venda'] - df['Custo Total']
-    
-    # Métricas de Topo
+    df['Data_Registo'] = pd.to_datetime(df['Data_Registo'])
+    df['Dias_Stock'] = (datetime.now() - df['Data_Registo']).dt.days
+    df['Custo_Total'] = df['Preco_China'] + df['Portes']
+    df['Lucro'] = df['Preco_Venda'] - df['Custo_Total']
+
+    # --- MÉTRICAS (Ideia 2: Lucro Real vs Potencial) ---
+    stock_ativo = df[df['Estado'] != 'Vendido']
+    vendidos = df[df['Estado'] == 'Vendido']
+
     m1, m2, m3 = st.columns(3)
-    investimento = df['Custo Total'].sum()
-    lucro_total = df['Lucro'].sum()
-    
-    m1.metric("Investimento Total", f"{investimento:.2f}€")
-    m2.metric("Lucro Potencial", f"{lucro_total:.2f}€", delta=f"{lucro_total:.2f}€")
-    m3.metric("Margem Média", f"{(lucro_total/investimento*100 if investimento > 0 else 0):.1f}%")
+    m1.metric("Investimento em Trânsito/Stock", f"{stock_ativo['Custo_Total'].sum():.2f}€")
+    m2.metric("Lucro REAL (Dinheiro no Bolso)", f"{vendidos['Lucro'].sum():.2f}€")
+    m3.metric("Itens Críticos (+30 dias)", len(stock_ativo[stock_ativo['Dias_Stock'] > 30]))
 
-    st.write("---")
-    st.subheader("📦 Gestão de Inventário")
-    st.info("Podes editar os valores ou apagar linhas (clica na linha e faz Delete). Grava no fim!")
-
-    # Editor de dados: permite mudar tudo menos as colunas calculadas
-    # Definimos as colunas que queremos ver na tabela de edição
-    colunas_para_editar = ["Nome", "Link", "Preco_China", "Portes", "Preco_Venda"]
+    # --- TABELA DE GESTÃO (Ideia 1 e 4) ---
+    st.subheader("📦 Inventário em Tempo Real")
     
+    # Configuração visual da tabela
     edited_df = st.data_editor(
-        df[colunas_para_editar], 
-        num_rows="dynamic", 
+        df,
+        num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
+        column_order=("Estado", "Nome", "Dias_Stock", "Preco_China", "Portes", "Preco_Venda", "Lucro", "Link"),
         column_config={
-            "Link": st.column_config.LinkColumn("Link Produto"),
-            "Preco_China": st.column_config.NumberColumn("China (€)", format="%.2f€"),
-            "Portes": st.column_config.NumberColumn("Portes (€)", format="%.2f€"),
-            "Preco_Venda": st.column_config.NumberColumn("Venda (€)", format="%.2f€"),
+            "Estado": st.column_config.SelectboxColumn("Estado", options=["Encomendado", "Em Trânsito", "Em Stock", "Vendido"], required=True),
+            "Dias_Stock": st.column_config.NumberColumn("Dias em Stock", help="Há quanto tempo este item está a ocupar espaço"),
+            "Lucro": st.column_config.NumberColumn("Lucro Est.", format="%.2f€"),
+            "Link": st.column_config.LinkColumn("Link")
         }
     )
 
-    if st.button("💾 Gravar Alterações na Google Sheet"):
-        # Grava apenas o que foi editado (as colunas base)
-        conn.update(data=edited_df)
+    if st.button("💾 Guardar Todas as Alterações"):
+        # Limpamos as colunas calculadas antes de gravar na Google
+        final_save = edited_df[colunas_base]
+        conn.update(data=final_save)
         st.cache_data.clear()
-        st.success("Tudo atualizado!")
+        st.success("Sistema atualizado!")
         st.rerun()
 
-else:
-    st.warning("Ainda não tens nada no stock. Começa a faturar!")
+    # --- ALERTA DE STOCK PODRE (Ideia 4) ---
+    itens_velhos = stock_ativo[stock_ativo['Dias_Stock'] > 30]
+    if not itens_velhos.empty:
+        st.warning(f"⚠️ Tens {len(itens_velhos)} produtos a ganhar pó há mais de um mês! Hora de baixar o preço?")
