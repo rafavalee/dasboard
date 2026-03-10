@@ -2,47 +2,43 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# --- SISTEMA DE LOGIN SIMPLES ---
+# OBRIGATÓRIO: Ser o primeiro comando do Streamlit a correr
+st.set_page_config(page_title="Resseling Pro", layout="wide")
+
+# --- SISTEMA DE LOGIN ---
 def check_password():
     """Retorna True se o utilizador introduziu a password correta."""
     def password_entered():
-        # Verifica se a password coincide com a que guardaste nas Secrets
         if st.session_state["password"] == st.secrets["password"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Limpa a password da memória por segurança
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # Primeira vez que o site abre: mostra o formulário
         st.title("🔐 Acesso Restrito")
         st.text_input("Introduz a Password do Império", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        # Password errada
         st.title("🔐 Acesso Restrito")
         st.text_input("Introduz a Password do Império", type="password", on_change=password_entered, key="password")
         st.error("❌ Password errada. Tenta outra vez ou volta para a China.")
         return False
     else:
-        # Password correta!
         return True
 
 if not check_password():
-    st.stop()  # Trava o site aqui se não estiver logado
+    st.stop()
 
-# --- DAQUI PARA BAIXO SEGUE O TEU CÓDIGO NORMAL ---
+# --- INÍCIO DO DASHBOARD (SÓ CORRE SE LOGADO) ---
 st.success("Bem-vindo de volta, Boss!")
-# (O resto do teu código da Google Sheet entra aqui)
 
-st.set_page_config(page_title="Resseling Pro", layout="wide")
-
-# 1. Ligar à Google Sheet
+# 1. Ligar à Google Sheet (ttl=0 para dados sempre frescos)
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(ttl=0)
 
 # Garantir que as colunas existem (caso a folha esteja vazia)
-if df.empty:
+if df.empty or df is None:
     df = pd.DataFrame(columns=["Nome", "Link", "Preco_China", "Portes", "Preco_Venda"])
 
 st.title("💰 Gestão de Stock China")
@@ -59,18 +55,19 @@ with st.expander("➕ Adicionar Novo Produto", expanded=False):
         
         if st.form_submit_button("Registar"):
             novo_dado = pd.DataFrame([{"Nome": nome, "Link": link, "Preco_China": p_china, "Portes": portes, "Preco_Venda": venda}])
-            df = pd.concat([df, novo_dado], ignore_index=True)
-            conn.update(data=df)
-            st.success("Gravado!")
+            df_atualizado = pd.concat([df, novo_dado], ignore_index=True)
+            conn.update(data=df_atualizado)
+            st.cache_data.clear() # Limpa a memória para forçar a leitura do novo dado
+            st.success("Gravado na nuvem!")
             st.rerun()
 
 # --- CÁLCULOS E ESTATÍSTICAS ---
 if not df.empty:
-    # Contas de cabeça (feitas pelo computador)
+    # Contas feitas pelo computador para não te cansares
     df['Custo Total'] = df['Preco_China'] + df['Portes']
     df['Lucro'] = df['Preco_Venda'] - df['Custo Total']
     
-    # 2. Métricas de Topo
+    # Métricas de Topo
     m1, m2, m3 = st.columns(3)
     investimento = df['Custo Total'].sum()
     lucro_total = df['Lucro'].sum()
@@ -81,32 +78,31 @@ if not df.empty:
 
     st.write("---")
     st.subheader("📦 Gestão de Inventário")
-    st.info("Podes editar os valores diretamente na tabela ou apagar linhas. Não te esqueças de clicar em 'Gravar Alterações'!")
+    st.info("Podes editar os valores ou apagar linhas (clica na linha e faz Delete). Grava no fim!")
 
-    # 3. Cores e Edição (Verde/Vermelho)
-    def style_lucro(v):
-        color = 'red' if v < 0 else 'green' if v > 0 else 'white'
-        return f'color: {color}; font-weight: bold'
-
-    # Editor de dados (permite apagar e editar)
+    # Editor de dados: permite mudar tudo menos as colunas calculadas
+    # Definimos as colunas que queremos ver na tabela de edição
+    colunas_para_editar = ["Nome", "Link", "Preco_China", "Portes", "Preco_Venda"]
+    
     edited_df = st.data_editor(
-        df, 
-        num_rows="dynamic", # Isto permite-te apagar linhas!
+        df[colunas_para_editar], 
+        num_rows="dynamic", 
         use_container_width=True,
         hide_index=True,
         column_config={
             "Link": st.column_config.LinkColumn("Link Produto"),
-            "Lucro": st.column_config.NumberColumn("Lucro (€)", format="%.2f€")
+            "Preco_China": st.column_config.NumberColumn("China (€)", format="%.2f€"),
+            "Portes": st.column_config.NumberColumn("Portes (€)", format="%.2f€"),
+            "Preco_Venda": st.column_config.NumberColumn("Venda (€)", format="%.2f€"),
         }
     )
 
     if st.button("💾 Gravar Alterações na Google Sheet"):
-        # Limpar colunas calculadas antes de gravar para não sujar a Google Sheet
-        to_save = edited_df.drop(columns=['Custo Total', 'Lucro'])
-        conn.update(data=to_save)
-        st.cache_data.clear() # Isto limpa a memória "à bruta"
-        st.success("Gravado na nuvem!")
+        # Grava apenas o que foi editado (as colunas base)
+        conn.update(data=edited_df)
+        st.cache_data.clear()
+        st.success("Tudo atualizado!")
         st.rerun()
 
 else:
-    st.warning("Ainda não tens nada no stock.")
+    st.warning("Ainda não tens nada no stock. Começa a faturar!")
